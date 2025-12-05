@@ -1,0 +1,8 @@
+wget https://neo4j.com/artifact.php?name=neo4j-community-2025.10.1-unix.tar.gz
+tar zxf artifact.php\?name\=neo4j-community-2025.10.1-unix.tar.gz 
+rm -f artifact.php\?name\=neo4j-community-2025.10.1-unix.tar.gz 
+mv neo4j-community-2025.10.1/ neo4j-10.1
+
+neo4j-admin dbms set-initial-password <password>
+
+cypher-shell -u neo4j -p <password>
