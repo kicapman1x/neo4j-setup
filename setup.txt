@@ -7,4 +7,4 @@ neo4j-admin dbms set-initial-password <password>
 
 cypher-shell -u neo4j -p <password>
 
-go create schema lo 
+go create schema lo
