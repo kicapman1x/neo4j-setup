@@ -6,3 +6,5 @@ mv neo4j-community-2025.10.1/ neo4j-10.1
 neo4j-admin dbms set-initial-password <password>
 
 cypher-shell -u neo4j -p <password>
+
+go create schema lo 
