@@ -7,4 +7,38 @@ neo4j-admin dbms set-initial-password <password>
 
 cypher-shell -u neo4j -p <password>
 
-go create schema lo
+create constraints for the data:
+CREATE CONSTRAINT agency_name_unique IF NOT EXISTS
+FOR (a:Agency)
+REQUIRE a.name IS UNIQUE;
+
+CREATE CONSTRAINT document_id_unique IF NOT EXISTS
+FOR (d:Document)
+REQUIRE d.doc_id IS UNIQUE;
+
+CREATE CONSTRAINT person_name_unique IF NOT EXISTS
+FOR (p:Person)
+REQUIRE p.name IS UNIQUE;
+
+CREATE CONSTRAINT program_name_unique IF NOT EXISTS
+FOR (p:Program)
+REQUIRE p.name IS UNIQUE;
+
+CREATE CONSTRAINT location_name_unique IF NOT EXISTS
+FOR (l:Location)
+REQUIRE l.name IS UNIQUE;
+
+CREATE CONSTRAINT law_name_unique IF NOT EXISTS
+FOR (l:Law)
+REQUIRE l.name IS UNIQUE;
+
+CREATE CONSTRAINT audience_name_unique IF NOT EXISTS
+FOR (u:Audience)
+REQUIRE u.name IS UNIQUE;
+
+add indexes:
+CREATE INDEX document_title_index IF NOT EXISTS
+FOR (d:Document) ON (d.title);
+
+CREATE INDEX document_date_index IF NOT EXISTS
+FOR (d:Document) ON (d.date);
