@@ -8,6 +8,20 @@ neo4j-admin dbms set-initial-password <password>
 cypher-shell -u neo4j -p <password>
 
 create constraints for the data:
+For vectordb
+CREATE CONSTRAINT doc_id IF NOT EXISTS
+FOR (d:Doc)
+REQUIRE d.id IS UNIQUE;
+
+CREATE VECTOR INDEX doc_embeddings IF NOT EXISTS
+FOR (d:Doc)
+ON d.embedding
+OPTIONS { indexConfig: {
+  `vector.dimensions`: 1536,
+  `vector.similarity_function`: 'cosine'
+}};
+
+For graphdb
 CREATE CONSTRAINT agency_name_unique IF NOT EXISTS
 FOR (a:Agency)
 REQUIRE a.name IS UNIQUE;

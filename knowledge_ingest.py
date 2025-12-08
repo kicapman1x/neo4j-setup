@@ -6,12 +6,19 @@ from dotenv import load_dotenv
 import json
 import re
 from openai import OpenAI
+from neo4j import GraphDatabase
 
 load_dotenv()
-raw_dir="/home/daddy/apps/neo4j/knowledge/raw"
-proc_dir="/home/daddy/apps/neo4j/knowledge/processed"
+raw_dir = os.getenv("READ_PATH")
+proc_dir = os.getenv("WRITE_PATH")
 
 open_ai_client = OpenAI()
+
+neo4j_uri = os.getenv("NEO4J_URI")
+neo4j_user = os.getenv("NEO4J_USER")
+neo4j_password = os.getenv("NEO4J_PASSWORD")
+
+ca_cert = os.getenv("CA_PATH")
 
 def process_files(raw_dir):
     print("Processing files from:", raw_dir)
@@ -120,5 +127,28 @@ def embed(texts):
         )
     return list(map(lambda n: n.embedding, response.data))
 
+def ingest_to_neo4j(proc_dir):
+    print("Ingesting data to Neo4j from:", proc_dir)
+    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password), encrypted=True, trusted_certificates=TrustCustomCAs(ca_cert))
+    with driver.session() as session:
+        chunks_path = os.path.join(proc_dir, "chunks")
+        embeddings_path = os.path.join(proc_dir, "embeddings")
+        with open(chunk_file, "r") as cf, open(emb_file, "r") as ef:
+            for i, (chunk, emb) in enumerate(zip(cf, ef)):
+                chunk = chunk.strip()
+                emb = json.loads(emb)
+                session.run(
+                    """
+                    MERGE (d:Doc {id: $id})
+                    SET d.text = $text,
+                        d.embedding = $embedding
+                    """,
+                    id=i,
+                    text=chunk,
+                    embedding=emb
+                )    
+    print("Data ingestion to Neo4j completed.")
+
 if __name__ == "__main__":
     process_files(raw_dir)
+    ingest_to_neo4j(proc_dir)
