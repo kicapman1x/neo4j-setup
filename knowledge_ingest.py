@@ -21,7 +21,11 @@ def process_files(raw_dir):
         file_path = os.path.join(raw_dir, file_name)
         with open(file_path, "r") as f:
             doc_text = f.read()
-            embeddings = embed(chunk_text(doc_text))
+            chunks = chunk_text(doc_text)
+            embeddings = embed(chunks)
+            with open(os.path.join(proc_dir, "chunks"), "a") as chnk_f:
+                for chunk in chunks:
+                    chnk_f.write(json.dumps(chunk) + "\n")
             with open(os.path.join(proc_dir, "embeddings"), "a") as embd_f:
                 for embd in embeddings:
                     embd_f.write(json.dumps(embd) + "\n")
