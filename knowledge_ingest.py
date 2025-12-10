@@ -28,14 +28,14 @@ def process_files(raw_dir):
         file_path = os.path.join(raw_dir, file_name)
         with open(file_path, "r") as f:
             doc_text = f.read()
-            # chunks = chunk_text(doc_text)
-            # embeddings = embed(chunks)
-            # with open(os.path.join(proc_dir, "chunks"), "a") as chnk_f:
-            #     for chunk in chunks:
-            #         chnk_f.write(json.dumps(chunk) + "\n")
-            # with open(os.path.join(proc_dir, "embeddings"), "a") as embd_f:
-            #     for embd in embeddings:
-            #         embd_f.write(json.dumps(embd) + "\n")
+            chunks = chunk_text(doc_text)
+            embeddings = embed(chunks)
+            with open(os.path.join(proc_dir, "chunks"), "a") as chnk_f:
+                for chunk in chunks:
+                    chnk_f.write(json.dumps(chunk) + "\n")
+            with open(os.path.join(proc_dir, "embeddings"), "a") as embd_f:
+                for embd in embeddings:
+                    embd_f.write(json.dumps(embd) + "\n")
             with open(os.path.join(proc_dir + "/nodes", file_name), "w") as out_f:
                 out_f.write(process_data(doc_text))
                 print("Processed data written to:", os.path.join(proc_dir + "/nodes", file_name))
@@ -132,7 +132,7 @@ def ingest_to_neo4j(proc_dir):
     driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password), encrypted=True, trusted_certificates=TrustCustomCAs(ca_cert))
     with driver.session() as session:
         #vectordb
-        # ingest_for_vectordb(session, proc_dir)
+        ingest_for_vectordb(session, proc_dir)
         #graphdb
         ingest_for_graphdb(session, proc_dir)
     driver.close()
