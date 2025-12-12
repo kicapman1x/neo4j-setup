@@ -5,21 +5,21 @@ from dotenv import load_dotenv
 import json
 import re
 from openai import OpenAI
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, TrustCustomCAs
 from flask import Flask, request, jsonify, abort
-from langchain_core.prompts.chat import ChatPromptTemplate, FewShotChatMessagePromptTemplate
+from langchain_core.prompts.chat import ChatPromptTemplate
+from langchain_core.prompts import FewShotChatMessagePromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 load_dotenv()
 
 #flask server
 app = Flask(__name__)
-logger = logging.getLogger(__name__)
 
 #ssl tingz
 cert_file = os.environ.get("CERT_PATH","./certs.pem")
 key_file = os.environ.get("KEY_PATH","./key.pem")
-ca_file= os.environ.get("CA_PATH","./ca.pem")
+ca_cert= os.environ.get("CA_PATH","./ca.pem")
 
 #OPENAI SETUP#
 # Setting up embedding model
@@ -72,45 +72,56 @@ neo4j_password = os.getenv("NEO4J_PASSWORD")
 
 driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password), encrypted=True, trusted_certificates=TrustCustomCAs(ca_cert))
 
-graphdb_hops = os.getenv("GRAPHDB_HOPS", 3)
-graphdb_topk = os.getenv("GRAPHDB_TOPK", 50)
-vectordb_topk = os.getenv("VECTORDB_TOPK", 5)
+graphdb_hops = int(os.getenv("GRAPHDB_HOPS", 3))
+graphdb_topk = int(os.getenv("GRAPHDB_TOPK", 50))
+vectordb_topk = int(os.getenv("VECTORDB_TOPK", 5))
 ###
 
 def handle_question(question):
+    #step back question generation
+    step_back_question = step_back_prompt(question)
+    print("Step back question generated:", step_back_question)
     #retrieve and consolidate answers from multiple retrievers
     retrievers = retriever_router(question)
+    print("Using retrievers:", retrievers)
+    combined_context = ""
     with driver.session() as session:
         for retriever in retrievers:
+            print("Using retriever:", retriever)
             if retriever == "graph_retriever":
-                graph_raw_answer = graph_retriever(question,session)
+                graph_raw_answer = graph_retriever(question,step_back_question,session)
                 #process then add to dict
+                cleaned_graph_answer = cleanup_graph_answer(graph_raw_answer)
+                combined_context += cleaned_graph_answer["context"] + "\n"
             elif retriever == "vector_retriever":
-                vector_raw_answer = vector_retriever(question,session)
+                vector_raw_answer = vector_retriever(question,step_back_question,session)
                 #process then add to dict
-        #combine answers? 
+                cleaned_vector_answer = cleanup_vector_answer(vector_raw_answer)
+                combined_context += cleaned_vector_answer["context"] + "\n"
+    print("Combined context from retrievers:", combined_context)
+    return "get fucked yalam"
 
 def retriever_router(question):
     #supposed to have logic to choose retriever based on question but I lazy do today kekw
     return ["graph_retriever", "vector_retriever"]
 
-def graph_retriever(question,session):
+def graph_retriever(question,step_back_question,session):
     #original question querying graphdb
+    print("Querying graphdb for original question")
     original_qn_context = graphdb_interface(question,session)
     #step back question querying graphdb
-    step_back_question = step_back_prompt(question)
+    print("Querying graphdb for step back question")
     step_back_qn_context = graphdb_interface(step_back_question,session)
     return {
         "original_question_context": original_qn_context,
         "step_back_question_context": step_back_qn_context
     }
 
-def vector_retriever(question,session):
+def vector_retriever(question,step_back_question,session):
     #original question querying vectordb
     embedded_original_question = embed([question])[0]
     original_qn_context = vectordb_interface(embedded_original_question,session)
     #step back question querying vectordb
-    step_back_question = step_back_prompt(question)
     embedded_step_back_question = embed([step_back_question])[0]
     step_back_qn_context = vectordb_interface(embedded_step_back_question,session)
     return {
@@ -120,53 +131,65 @@ def vector_retriever(question,session):
 
 
 def graphdb_interface(question,session):
+    print("GraphDB querying for question:", question)
     cypher = f"""
         CALL db.index.fulltext.queryNodes(
             'entityIndex',
-            {question}
+            $query
         ) YIELD node, score
         WITH node
         MATCH p = (node)-[*1..{graphdb_hops}]-(connected)
         RETURN p LIMIT {graphdb_topk}
         """
-    result = session.run(cypher)
+    # print("Executing Cypher query:", cypher)
+    results = session.run(cypher, {"query": question})
 
     subgraphs = []
-    for record in results:
-        path = record["p"]
+    for r in results:
+        # print(r)
+        path = r["p"]
         segment_data = {
             "nodes": [],
             "relationships": []
         }
 
         for n in path.nodes:
-            segment_data["nodes"].append(dict(n))
-
-        for r in path.relationships:
-            start_node = path.nodes[r.start_node.id]
-            end_node = path.nodes[r.end_node.id]
-            segment_data["relationships"].append({
-                "type": r.type,
-                "start_node": dict(start_node),
-                "end_node": dict(end_node),
-                "properties": dict(r)
+            segment_data["nodes"].append({
+                "labels": list(n.labels),
+                "properties": dict(n)
             })
 
+        for r in path.relationships:
+            segment_data["relationships"].append({
+                "type": r.type,
+                "start_node": {
+                    "labels": list(r.start_node.labels),
+                    "properties": dict(r.start_node)
+                },
+                "end_node": {
+                    "labels": list(r.end_node.labels),
+                    "properties": dict(r.end_node)
+                },
+                "properties": dict(r)
+            })
         subgraphs.append(segment_data)
+    # print("Retrieved subgraphs:", subgraphs)
     return subgraphs
 
 def vectordb_interface(embedded_question,session):
+    print("VectorDB querying for embedded question.")
     cypher = f"""
         CALL db.index.vector.queryNodes(
           'doc_embeddings',
           {vectordb_topk},
-          {embedded_question}
+          $embedding
         )
         YIELD node, score
         RETURN node.id AS id, node.text AS text, score
         ORDER BY score DESC
     """
-    result = session.run(cypher, embedding=embedded_question)
+    # print("Executing Cypher query:", cypher)
+    results = session.run(cypher, {"embedding": embedded_question})
 
     chunks = []
     for r in results:
@@ -177,33 +200,109 @@ def vectordb_interface(embedded_question,session):
         })
     return chunks
 
+def cleanup_graph_answer(raw_answer):
+    print("Cleaning up graph answer.")
+    #merge from both original and step back contexts
+    merged_paths = []
+    merged_paths.extend(raw_answer["original_question_context"])
+    merged_paths.extend(raw_answer["step_back_question_context"])
+    #deduplicate relationships
+    unique_rels = set()
+    facts = []
+
+    for path in merged_paths:
+        for rel in path["relationships"]:
+            start = rel["start_node"]["properties"]
+            end = rel["end_node"]["properties"]
+
+            start_name = start.get("name") or start.get("title")
+            end_name = end.get("name") or end.get("title")
+            rel_type = rel["type"]
+
+            if not start_name or not end_name:
+                continue
+
+            key = (start_name, rel_type, end_name)
+            if key in unique_rels:
+                continue
+
+            unique_rels.add(key)
+
+            fact = f"{start_name} {rel_type.replace('_', ' ')} {end_name}."
+            facts.append(fact)
+    
+    graph_context = "\n".join(f"- {f}" for f in facts)
+
+    return {
+        "type": "graph",
+        "facts": facts,
+        "context": graph_context
+    }
+
+def cleanup_vector_answer(raw_answer):
+    print("Cleaning up vector answer.")
+    #merge from both original and step back contexts
+    merged_chunks = []
+    merged_chunks.extend(raw_answer["original_question_context"])
+    merged_chunks.extend(raw_answer["step_back_question_context"])
+    #remove duplicates based on id
+    unique_chunks = {}
+    for chunk in merged_chunks:
+        cid = chunk.get("id")   # SAFE access
+
+        if cid is None:
+            # optional: log it
+            # print("Skipping chunk without id:", chunk)
+            continue
+
+        if cid not in unique_chunks:
+            unique_chunks[cid] = chunk
+        else:
+            if chunk.get("score", 0) > unique_chunks[cid].get("score", 0):
+                unique_chunks[cid] = chunk
+
+    cleaned_chunks = list(unique_chunks.values())
+    #sort by score descending
+    cleaned_chunks.sort(key=lambda x: x.get("score", 0), reverse=True)
+    #build vector answer
+    context = "\n\n".join(
+        f"\n-  {c['text']}"
+        for c in cleaned_chunks
+    )
+    return {
+        "type": "vector",
+        "chunks": cleaned_chunks,
+        "context": context
+    }
+
 def step_back_prompt(question):
     step_back_question = question_gen.invoke({"question": question})
     return step_back_question
 
 @app.route('/client_query', methods=['POST'])
 def QueryPerceptor():
+    print("Received request from:", request.host)
     allowed_host = "graph-rag.han.gg"
     host = request.host.split(":")[0]
+    print(host)
     if host != allowed_host:
-        logger.warning(f"Unauthorized request to {request.host}")
         abort(403, description="Forbidden: Invalid Host header")
     try:
         data = request.get_json()
-        logger.debug(f'Data received: {data}')
         if not data or 'question' not in data:
             return jsonify({"error": "Missing 'question' field in JSON request"}), 400
         else:
+            print(data)
+            print("Processing question:", data['question'])
             question = data['question']
             
             response = handle_question(question)
 
             return jsonify({
-                "original_question": question,
-                "step_back_question": step_back_question
+                "response": response
             })
     except Exception as e:
-        logger.error(f"Error processing request: {str(e)}")
+        print("Error processing request:", str(e))
         return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == "__main__":
