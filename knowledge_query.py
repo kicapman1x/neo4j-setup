@@ -63,6 +63,20 @@ prompt = ChatPromptTemplate.from_messages([
 ])
 
 question_gen = prompt | ChatOpenAI(temperature=0) | StrOutputParser()
+
+# Setting up final prompt
+final_prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a highly intelligent question answering bot. Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer. As much as possible, base your answer on the provided context."),
+    ("human", """
+        Question:{question}
+
+        Step back prompt to base your thinking on: {step_back_question}
+
+        Context: {context}
+    """)
+])
+
+final_prompt_gen = final_prompt | ChatOpenAI(temperature=0) | StrOutputParser()
 ###
 
 #NEO4J SETUP#
@@ -99,7 +113,14 @@ def handle_question(question):
                 cleaned_vector_answer = cleanup_vector_answer(vector_raw_answer)
                 combined_context += cleaned_vector_answer["context"] + "\n"
     print("Combined context from retrievers:", combined_context)
-    return "get fucked yalam"
+    #final answer generation
+    answer = final_prompt_gen.invoke({
+        "question": question,
+        "step_back_question": step_back_question,
+        "context": combined_context
+    })
+    print("Final answer generated:", answer)
+    return answer
 
 def retriever_router(question):
     #supposed to have logic to choose retriever based on question but I lazy do today kekw
